@@ -211,29 +211,52 @@ To force re-download all albums, simply delete `downloaded.edn`.
 
 ## Quick Start (NixOS)
 
-1. **Get Spotify credentials** (see Setup section below)
+### Prerequisites
 
-2. **Get refresh token**:
-   ```bash
-   nix develop  # or use shell.nix
-   export SPOTIFY_CLIENT_ID="your_client_id"
-   export SPOTIFY_CLIENT_SECRET="your_client_secret"
-   ./get_refresh_token.clj
-   ```
+Before using on NixOS, you need to obtain your Spotify credentials and refresh token.
 
-3. **Add to your NixOS configuration** (see full example below)
+#### 1. Create a Spotify App
 
-4. **Deploy and enjoy**:
-   ```bash
-   nixos-rebuild switch
-   systemctl status spotify-sync.timer
-   ```
+1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
+2. Log in and click "Create app"
+3. Fill in the details:
+   - App name: "Liked Songs Fetcher" (or any name)
+   - Redirect URI: `http://127.0.0.1:8888/callback`
+   - Check **Web API**
+4. Note your **Client ID** and **Client Secret**
 
-## NixOS Integration
+#### 2. Get a Refresh Token
 
-### Using as a Flake
+You need to run the helper script once to get a refresh token:
 
-Add to your `flake.nix`:
+```bash
+# Clone the repo temporarily or use nix-shell
+git clone https://github.com/winterscar/spotify-sync.git
+cd spotify-sync
+nix-shell  # or: nix develop
+
+# Set your credentials
+export SPOTIFY_CLIENT_ID="your_client_id"
+export SPOTIFY_CLIENT_SECRET="your_client_secret"
+
+# Run the helper script
+./get_refresh_token.clj
+
+# Follow the instructions:
+# 1. Open the URL it displays in your browser
+# 2. Authorize the app
+# 3. Copy the code from the redirect URL
+# 4. Run: ./get_refresh_token.clj YOUR_CODE_HERE
+# 5. Save the refresh token it displays
+```
+
+### Integration Methods
+
+Choose the method that matches your NixOS setup:
+
+#### Method 1: Flakes-based Configuration
+
+If your system uses flakes, create or edit your `flake.nix`:
 
 ```nix
 {
@@ -245,31 +268,28 @@ Add to your `flake.nix`:
     };
   };
 
-  outputs = { self, nixpkgs, spotify-sync, ... }: {
+  outputs = { self, nixpkgs, spotify-sync }: {
     nixosConfigurations.yourhostname = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       modules = [
-        spotify-sync.nixosModules.default
         ./configuration.nix
+        spotify-sync.nixosModules.default
       ];
     };
   };
 }
 ```
 
-Then in your `configuration.nix`:
+Then add to your `configuration.nix`:
 
 ```nix
 { config, pkgs, ... }:
 
 let
-  # Define your secrets as constants here
-  # WARNING: These will be in the Nix store which is world-readable!
-  # For production, consider using agenix or sops-nix instead
   spotifySecrets = {
-    clientId = "your_client_id_here";
-    clientSecret = "your_client_secret_here";
-    refreshToken = "your_refresh_token_here";
+    clientId = "your_client_id";
+    clientSecret = "your_client_secret";
+    refreshToken = "your_refresh_token";
   };
 in
 {
@@ -279,28 +299,143 @@ in
     clientSecret = spotifySecrets.clientSecret;
     refreshToken = spotifySecrets.refreshToken;
     downloadPath = "/var/lib/spotify-sync";
-    schedule = "daily";  # or "hourly", "weekly", "*:0/15", etc.
-    format = "mp3";      # or "flac" for lossless quality
+    schedule = "daily";
+    format = "mp3";
+  };
+}
+```
+
+#### Method 2: Traditional Configuration (without flakes)
+
+If you don't use flakes, you can import the module directly in your `configuration.nix`.
+
+**Option A: Add to your existing configuration.nix**
+
+If you already have a `let ... in` block, just add these definitions to it:
+
+```nix
+{ config, pkgs, ... }:
+
+let
+  # Your existing let bindings...
+
+  # Add these:
+  spotify-sync = builtins.fetchGit {
+    url = "https://github.com/winterscar/spotify-sync.git";
+    ref = "main";  # or a specific tag/commit
+  };
+
+  spotifySecrets = {
+    clientId = "your_client_id";
+    clientSecret = "your_client_secret";
+    refreshToken = "your_refresh_token";
+  };
+in
+{
+  imports = [
+    # Your other imports...
+    "${spotify-sync}/nixos-module.nix"
+  ];
+
+  # Your other configuration...
+
+  services.spotify-sync = {
+    enable = true;
+    clientId = spotifySecrets.clientId;
+    clientSecret = spotifySecrets.clientSecret;
+    refreshToken = spotifySecrets.refreshToken;
+    downloadPath = "/var/lib/spotify-sync";
+    schedule = "daily";
+    format = "mp3";
+  };
+}
+```
+
+**Option B: If you don't have a let block**
+
+Wrap your entire configuration:
+
+```nix
+{ config, pkgs, ... }:
+
+let
+  spotify-sync = builtins.fetchGit {
+    url = "https://github.com/winterscar/spotify-sync.git";
+    ref = "main";
+  };
+
+  spotifySecrets = {
+    clientId = "your_client_id";
+    clientSecret = "your_client_secret";
+    refreshToken = "your_refresh_token";
+  };
+in
+{
+  imports = [
+    # Your existing imports...
+    "${spotify-sync}/nixos-module.nix"
+  ];
+
+  # All your existing configuration options go here...
+  # boot.loader...
+  # networking...
+  # users...
+  # etc.
+
+  services.spotify-sync = {
+    enable = true;
+    clientId = spotifySecrets.clientId;
+    clientSecret = spotifySecrets.clientSecret;
+    refreshToken = spotifySecrets.refreshToken;
+    downloadPath = "/var/lib/spotify-sync";
+    schedule = "daily";
+    format = "mp3";
+  };
+}
+```
+
+#### Method 3: Local Clone
+
+If you've cloned the repo locally:
+
+```nix
+{ config, pkgs, ... }:
+
+let
+  spotifySecrets = {
+    clientId = "your_client_id";
+    clientSecret = "your_client_secret";
+    refreshToken = "your_refresh_token";
+  };
+in
+{
+  imports = [
+    # Your other imports...
+    /path/to/spotify-sync/nixos-module.nix
+  ];
+
+  services.spotify-sync = {
+    enable = true;
+    clientId = spotifySecrets.clientId;
+    clientSecret = spotifySecrets.clientSecret;
+    refreshToken = spotifySecrets.refreshToken;
+    downloadPath = "/var/lib/spotify-sync";
+    schedule = "daily";
+    format = "mp3";
   };
 }
 ```
 
 ### Secret Management
 
-**WARNING**: The basic configuration above stores secrets directly in the Nix store, which is world-readable. This is convenient but not secure for production use.
+**⚠️ WARNING**: The examples above store secrets directly in your Nix configuration, which ends up in the world-readable Nix store. This is convenient for personal use but not secure for production.
 
-For better security, consider using a secrets management solution like agenix or sops-nix. The current module expects direct string values, so you would need to read the secret file contents. Here are some approaches:
+For better security, consider:
 
-**Option 1: Use secrets management with file reading**
-
-Modify the module to support file-based secrets by adding options like `clientSecretFile` and using `LoadCredential` in the systemd service.
-
-**Option 2: Keep secrets in a separate, restricted file**
-
-Store your secrets in a separate `.nix` file with restricted permissions that's imported into your configuration:
+**Option 1: Separate restricted file**
 
 ```nix
-# secrets.nix (chmod 600)
+# secrets.nix (chmod 600 secrets.nix)
 {
   spotifyClientSecret = "your_secret_here";
   spotifyRefreshToken = "your_token_here";
@@ -311,33 +446,35 @@ let
   secrets = import ./secrets.nix;
 in {
   services.spotify-sync = {
-    clientId = "your_client_id_here";
+    clientId = "your_client_id_here";  # Not sensitive
     clientSecret = secrets.spotifyClientSecret;
     refreshToken = secrets.spotifyRefreshToken;
   };
 }
 ```
 
-Note: This still puts secrets in the Nix store, but at least restricts access to the source file.
+**Option 2: Use agenix or sops-nix**
 
-### Getting Your Refresh Token
+If you need proper secrets management, consider modifying the module to support file-based secrets with systemd's `LoadCredential`.
 
-Before enabling the service, you need to get a refresh token:
+### Deploy
+
+After configuring, rebuild your system:
 
 ```bash
-# Set your credentials
-export SPOTIFY_CLIENT_ID="your_client_id"
-export SPOTIFY_CLIENT_SECRET="your_client_secret"
-
-# Run the helper script
-./get_refresh_token.clj
-
-# Follow the instructions to get your refresh token
+sudo nixos-rebuild switch
 ```
 
-Then store the refresh token in your secrets management system.
+Check that the service and timer are running:
 
-### Service Management
+```bash
+systemctl status spotify-sync.timer
+systemctl list-timers spotify-sync.timer
+```
+
+### Service Commands
+
+Once deployed, you can manage the service with these commands:
 
 ```bash
 # Check service status
@@ -358,16 +495,26 @@ systemctl start spotify-sync.service
 
 ### Configuration Options
 
-**Format**
+All available options for `services.spotify-sync`:
 
-The `format` option controls the audio quality and file size of downloaded tracks:
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enable` | boolean | `false` | Enable the spotify-sync service |
+| `clientId` | string | - | Spotify application client ID (required) |
+| `clientSecret` | string | - | Spotify client secret (required, stored in Nix store) |
+| `refreshToken` | string | - | Spotify refresh token (required, stored in Nix store) |
+| `downloadPath` | path | `/var/lib/spotify-sync` | Directory where songs will be downloaded |
+| `schedule` | string | `"daily"` | When to run sync (systemd timer format) |
+| `format` | enum | `"mp3"` | Audio format: `"mp3"` or `"flac"` |
+| `user` | string | `"spotify-sync"` | User account for the service |
+| `group` | string | `"spotify-sync"` | Group for the service |
+
+**Format Options**
 
 - `"mp3"` (default) - Smaller file size (~5-10 MB per track), lossy compression, widely compatible
 - `"flac"` - Larger file size (~30-50 MB per track), lossless quality, best audio fidelity
 
-**Schedule**
-
-The `schedule` option uses systemd calendar format:
+**Schedule Examples** (systemd calendar format)
 
 - `"hourly"` - Every hour on the hour
 - `"daily"` - Every day at midnight
