@@ -12,6 +12,7 @@ This project uses a modified version of [spotify-dl](https://github.com/GuillemC
 - 🎯 **ID-based matching**: Perfect file matching using Spotify track IDs
 - 🎧 **Flexible formats**: Choose MP3 (smaller) or FLAC (lossless) quality
 - ⚡ **Smart fetching**: By default only checks 50 most recent likes for efficiency
+- 🛡️ **Media server friendly**: Downloads to temp directory first to prevent premature indexing
 - 🐧 **NixOS integration**: Deploy as a systemd service with scheduled runs
 - 🔒 **Secure**: Supports agenix/sops-nix for secret management
 
@@ -135,13 +136,16 @@ bb fetch_liked_songs.clj
 
 The script will:
 1. Authenticate with Spotify using your refresh token
-2. Fetch all your liked songs
+2. Fetch all your liked songs (or just the 50 most recent)
 3. Group songs by album
 4. Skip albums that have already been downloaded (tracked in `downloaded.edn`)
-5. **Download entire albums** (not just individual liked songs) as MP3 files
+5. **Download entire albums** to a temporary directory (`/tmp/spotify-sync-download`)
 6. Query Spotify for all tracks in each album to ensure complete downloads
 7. Organize downloaded files into `./<artist>/<album [year]>/<track>.mp3`
 8. Update `downloaded.edn` with successfully downloaded albums
+9. Clean up temporary directory
+
+**Note**: Files are downloaded to `/tmp/spotify-sync-download` first to prevent media servers (like Plex) from indexing incomplete files during the download process.
 
 **Why download full albums?**
 - More efficient than downloading songs one-by-one
@@ -191,6 +195,10 @@ For example, with `downloadPath = "/var/lib/spotify-sync"`, tracks will be at:
 - `/var/lib/spotify-sync/Artist Name/Album Name [2024]/Track 01.mp3`
 
 Album directories include the release year in square brackets for easy sorting and identification. Files will have `.mp3` or `.flac` extension depending on your configured format.
+
+**Temporary Download Directory**: During the download process, files are first downloaded to `/tmp/spotify-sync-download/` (outside your media directory) and then moved to their final organized location. This prevents media servers like Plex from detecting and indexing incomplete files. The temporary directory is automatically cleaned up after successful organization.
+
+When running as a systemd service, `PrivateTmp=true` provides an isolated `/tmp` namespace that's automatically cleaned up when the service exits, providing additional security and ensuring no leftover files.
 
 The `downloaded.edn` file tracks which **albums** have been successfully downloaded by their Spotify URI. This allows the script to:
 - Skip already-downloaded albums on subsequent runs
@@ -629,6 +637,16 @@ users.users.admin = {
 ```
 
 Note: The module will NOT create or modify your user if you specify it - it only creates the `spotify-sync` system user when using the defaults.
+
+**Incomplete downloads / leftover files**
+
+If a sync is interrupted, you may find incomplete files in `/tmp/spotify-sync-download/`. These are automatically cleaned up on the next run. If you need to manually clean them:
+
+```bash
+rm -rf /tmp/spotify-sync-download
+```
+
+The temporary directory is in `/tmp` (outside your media directory) to ensure media servers never scan it.
 
 **Redirect URI Issues**
 

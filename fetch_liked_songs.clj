@@ -17,6 +17,7 @@
       (str (System/getenv "HOME") "/src/spotify-sync/spotify-dl/target/debug/spotify-dl"))))
 (def downloaded-file "downloaded.edn")
 (def songs-dir ".")
+(def temp-download-dir "/tmp/spotify-sync-download")
 
 (defn get-env-var [var-name]
   (or (System/getenv var-name)
@@ -38,6 +39,32 @@
   (-> s
       (str/replace #"[/\\:*?\"<>|]" "_")
       (str/trim)))
+
+(defn ensure-temp-dir []
+  "Create and clean temporary download directory"
+  (let [temp-dir (io/file temp-download-dir)]
+    ;; Remove old temp directory if it exists
+    (when (.exists temp-dir)
+      (doseq [file (.listFiles temp-dir)]
+        (.delete file))
+      (.delete temp-dir))
+    ;; Create fresh temp directory
+    (.mkdir temp-dir)
+    temp-dir))
+
+(defn cleanup-temp-dir []
+  "Remove temporary download directory"
+  (try
+    (let [temp-dir (io/file temp-download-dir)]
+      (when (.exists temp-dir)
+        (doseq [file (.listFiles temp-dir)]
+          (try
+            (.delete file)
+            (catch Exception e
+              (println (str "Warning: Could not delete temp file " (.getName file) ": " (.getMessage e))))))
+        (.delete temp-dir)))
+    (catch Exception e
+      (println (str "Warning: Could not clean up temp directory: " (.getMessage e))))))
 
 (defn get-access-token
   "Get access token using refresh token flow"
@@ -75,8 +102,9 @@
                             :id (get-in item [:track :id])
                             :uri (get-in item [:track :uri])}))
                        (:items body))
-           accumulated (into all-tracks tracks)]
-       (if (and fetch-all? (if-let [next-url (:next body)] next-url false))
+           accumulated (into all-tracks tracks)
+           next-url (:next body)]
+       (if (and fetch-all? next-url)
          (recur next-url accumulated)
          accumulated)))))
 
@@ -133,7 +161,7 @@
   (println "\nOrganizing downloaded files...")
   (let [downloaded (read-downloaded)
         successful (atom downloaded)
-        current-dir "."]
+        current-dir temp-download-dir]
 
     (doseq [{:keys [album-uri album-id album year artist]} albums-to-process]
       (println (str "\nProcessing album: " album " [" year "]..."))
@@ -185,17 +213,25 @@
     (if (empty? unique-albums)
       (println "Nothing to download!")
       (do
-        (println (str "Downloading albums as " (str/upper-case format) "...\n"))
+        ;; Ensure clean temp directory for downloads
+        (ensure-temp-dir)
+        (println (str "Downloading albums as " (str/upper-case format) " to temporary directory...\n"))
         (let [album-uris (mapv :album-uri unique-albums)
               args (concat ["-a" access-token "-f" format] album-uris)
               _ (println "Running spotify-dl with" (count album-uris) "albums...")
-              result (apply process/shell {:out :inherit :err :inherit} spotify-dl-bin args)]
+              ;; Download to temp directory
+              result (apply process/shell {:out :inherit :err :inherit :dir temp-download-dir}
+                            spotify-dl-bin args)]
           (if (zero? (:exit result))
             (do
               (println "\n✓ Download complete!")
-              (process-album-downloads unique-albums access-token format))
+              (process-album-downloads unique-albums access-token format)
+              ;; Clean up temp directory after successful organization
+              (cleanup-temp-dir)
+              (println "✓ Temporary files cleaned up"))
             (do
               (println "\n✗ Download failed with exit code:" (:exit result))
+              (cleanup-temp-dir)
               (System/exit 1))))))))
 
 (defn -main []
@@ -218,6 +254,8 @@
       (when (and (ex-data e) (= 400 (:status (ex-data e))))
         (println "\nIf you're getting a 400 error, your refresh token may be invalid.")
         (println "Run ./get_refresh_token.clj to generate a new refresh token."))
+      ;; Clean up temp directory on error
+      (cleanup-temp-dir)
       (System/exit 1))))
 
 (-main)

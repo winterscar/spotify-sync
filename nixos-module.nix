@@ -174,7 +174,7 @@ in
         ExecStart = "${spotify-sync}/bin/spotify-sync";
 
         # Security hardening
-        PrivateTmp = true;
+        PrivateTmp = true;  # Provides private /tmp namespace, auto-cleaned on exit
         ProtectSystem = "strict";
         # Disable ProtectHome if download path is in /home
         ProtectHome = mkIf (!(lib.hasPrefix "/home/" cfg.downloadPath)) true;
