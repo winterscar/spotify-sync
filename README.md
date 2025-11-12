@@ -7,7 +7,7 @@ This project uses a modified version of [spotify-dl](https://github.com/GuillemC
 ## Features
 
 - 🎵 **Album-based downloading**: Downloads entire albums when you like a song
-- 📁 **Organized structure**: `songs/<artist>/<album [year]>/<track>.mp3`
+- 📁 **Organized structure**: `<downloadPath>/<artist>/<album [year]>/<track>.mp3`
 - 🔄 **Incremental sync**: Only downloads new albums on subsequent runs
 - 🎯 **ID-based matching**: Perfect file matching using Spotify track IDs
 - 🎧 **Flexible formats**: Choose MP3 (smaller) or FLAC (lossless) quality
@@ -137,7 +137,7 @@ The script will:
 4. Skip albums that have already been downloaded (tracked in `downloaded.edn`)
 5. **Download entire albums** (not just individual liked songs) as MP3 files
 6. Query Spotify for all tracks in each album to ensure complete downloads
-7. Organize downloaded files into `./songs/<artist>/<album [year]>/<track>.mp3`
+7. Organize downloaded files into `./<artist>/<album [year]>/<track>.mp3`
 8. Update `downloaded.edn` with successfully downloaded albums
 
 **Why download full albums?**
@@ -168,10 +168,10 @@ cd spotify-dl
 
 ## File Organization
 
-Downloaded songs are organized into a clean directory structure:
+Downloaded songs are organized into a clean directory structure within your configured `downloadPath`:
 
 ```
-songs/
+<downloadPath>/
 ├── Artist Name/
 │   ├── Album Name [2024]/
 │   │   ├── Track 01.mp3  (or .flac)
@@ -183,6 +183,9 @@ songs/
     └── Album [2022]/
         └── Track.mp3
 ```
+
+For example, with `downloadPath = "/var/lib/spotify-sync"`, tracks will be at:
+- `/var/lib/spotify-sync/Artist Name/Album Name [2024]/Track 01.mp3`
 
 Album directories include the release year in square brackets for easy sorting and identification. Files will have `.mp3` or `.flac` extension depending on your configured format.
 
@@ -202,7 +205,7 @@ To force re-download all albums, simply delete `downloaded.edn`.
   - You'll get the complete album even if you only liked one song
 - **ID-based file matching**: Files are named by their Spotify track ID during download, then renamed to proper track names when organized
   - Ensures perfect matching regardless of special characters, multiple artists, or featured artists
-  - Example: `4cOdK2wGLETKBW3PvgPWqT.mp3` → `songs/Artist/Album [2024]/Track Name.mp3`
+  - Example: `4cOdK2wGLETKBW3PvgPWqT.mp3` → `Artist/Album [2024]/Track Name.mp3`
 - Requires the `user-library-read` and `streaming` scopes
   - `user-library-read`: Access your liked songs
   - `streaming`: Enables token to be used with spotify-dl and librespot

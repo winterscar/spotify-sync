@@ -16,7 +16,7 @@
       "spotify-dl"  ; In Nix, use from PATH
       (str (System/getenv "HOME") "/src/spotify-sync/spotify-dl/target/debug/spotify-dl"))))
 (def downloaded-file "downloaded.edn")
-(def songs-dir "songs")
+(def songs-dir ".")
 
 (defn get-env-var [var-name]
   (or (System/getenv var-name)
@@ -104,7 +104,7 @@
       expected-file)))
 
 (defn organize-file [track current-file format]
-  "Move file to organized directory structure: songs/<artist>/<album [year]>/<track>.<format>"
+  "Move file to organized directory structure: <artist>/<album [year]>/<track>.<format>"
   (let [artist (sanitize-filename (:artist track))
         album-base (sanitize-filename (:album track))
         album-with-year (if-let [year (:year track)]
