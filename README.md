@@ -263,7 +263,7 @@ If your system uses flakes, create or edit your `flake.nix`:
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     spotify-sync = {
-      url = "github:winterscar/spotify-sync";
+      url = "github:winterscar/spotify-sync?submodules=1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -323,6 +323,7 @@ let
   spotify-sync = builtins.fetchGit {
     url = "https://github.com/winterscar/spotify-sync.git";
     ref = "main";  # or a specific tag/commit
+    submodules = true;  # Important: fetch git submodules
   };
 
   spotifySecrets = {
@@ -362,6 +363,7 @@ let
   spotify-sync = builtins.fetchGit {
     url = "https://github.com/winterscar/spotify-sync.git";
     ref = "main";
+    submodules = true;  # Important: fetch git submodules
   };
 
   spotifySecrets = {
@@ -525,6 +527,28 @@ All available options for `services.spotify-sync`:
 
 ## Troubleshooting
 
-**Redirect URI Issues**: If Spotify rejects `http://127.0.0.1:8888/callback`, you can:
+**NixOS Build Errors**
+
+**Error: librespot-metadata failed to build**
+
+If you see errors like `error: 1 dependencies of derivation '/nix/store/...-librespot-metadata-0.8.0.drv' failed to build`:
+
+This happens when git submodules aren't fetched. Make sure you have `submodules = true` in your `builtins.fetchGit` call:
+
+```nix
+spotify-sync = builtins.fetchGit {
+  url = "https://github.com/winterscar/spotify-sync.git";
+  ref = "main";
+  submodules = true;  # This is required!
+};
+```
+
+**Error: Could not find openssl via pkg-config**
+
+If you see errors about OpenSSL not being found, the repository might have an outdated version of the module. Pull the latest changes which include OpenSSL as a build dependency. If you're using a local clone, make sure you've pulled the latest commits that include the OpenSSL fix.
+
+**Redirect URI Issues**
+
+If Spotify rejects `http://127.0.0.1:8888/callback`, you can:
 1. Try using a public redirect URI like `http://example.com` (then just copy the code from your browser's address bar after being redirected)
 2. Update the `redirect-uri` variable in the scripts to match whatever URI Spotify accepts
