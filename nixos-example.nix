@@ -42,9 +42,10 @@ in
     # Audio format: "mp3" (smaller) or "flac" (lossless, larger)
     format = "mp3";
 
-    # Optional: customize user/group
-    # user = "spotify-sync";
-    # group = "spotify-sync";
+    # Optional: If using a path in /home/, set user/group to your user
+    # downloadPath = "/home/youruser/music";
+    # user = "youruser";
+    # group = "users";
   };
 
   # Alternative: Using agenix for secrets management (more secure)

@@ -145,16 +145,22 @@
             };
           };
 
-          config = mkIf cfg.enable {
-            users.users.${cfg.user} = {
-              isSystemUser = true;
-              group = cfg.group;
-              home = cfg.downloadPath;
-              createHome = true;
-              description = "Spotify sync service user";
-            };
+          config = mkIf cfg.enable (mkMerge [
+            # Only create system user and group if using defaults
+            (mkIf (cfg.user == "spotify-sync" && cfg.group == "spotify-sync") {
+              users.users.spotify-sync = {
+                isSystemUser = true;
+                group = "spotify-sync";
+                home = cfg.downloadPath;
+                createHome = true;
+                description = "Spotify sync service user";
+              };
 
-            users.groups.${cfg.group} = {};
+              users.groups.spotify-sync = {};
+            })
+
+            # Service configuration (always applied when enabled)
+            {
 
             systemd.services.spotify-sync = {
               description = "Sync Spotify liked songs";
@@ -180,7 +186,8 @@
                 # Security hardening
                 PrivateTmp = true;
                 ProtectSystem = "strict";
-                ProtectHome = true;
+                # Disable ProtectHome if download path is in /home
+                ProtectHome = mkIf (!(lib.hasPrefix "/home/" cfg.downloadPath)) true;
                 ReadWritePaths = [ cfg.downloadPath ];
                 NoNewPrivileges = true;
                 ProtectKernelTunables = true;
@@ -205,7 +212,8 @@
                 RandomizedDelaySec = "5m";
               };
             };
-          };
+            }
+          ]);
         };
     };
 }

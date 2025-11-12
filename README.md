@@ -304,6 +304,11 @@ in
     downloadPath = "/var/lib/spotify-sync";
     schedule = "daily";
     format = "mp3";
+
+    # Optional: If using a path in /home/, set user/group
+    # downloadPath = "/home/youruser/music";
+    # user = "youruser";
+    # group = "users";
   };
 }
 ```
@@ -511,8 +516,8 @@ All available options for `services.spotify-sync`:
 | `downloadPath` | path | `/var/lib/spotify-sync` | Directory where songs will be downloaded |
 | `schedule` | string | `"daily"` | When to run sync (systemd timer format) |
 | `format` | enum | `"mp3"` | Audio format: `"mp3"` or `"flac"` |
-| `user` | string | `"spotify-sync"` | User account for the service |
-| `group` | string | `"spotify-sync"` | Group for the service |
+| `user` | string | `"spotify-sync"` | User account for the service (set to your username for `/home` paths) |
+| `group` | string | `"spotify-sync"` | Group for the service (set to your group for `/home` paths) |
 
 **Format Options**
 
@@ -567,6 +572,39 @@ This error occurs when the script tries to use a hardcoded development path inst
 ```bash
 sudo nixos-rebuild switch --refresh
 ```
+
+**Error: Failed at step CHDIR spawning ... Permission denied**
+
+This happens when the service can't access the `downloadPath` directory. Common causes:
+
+1. **Using a path in `/home/` with the default user**: The `spotify-sync` user doesn't have permission to access your home directory. **Solution**: Set the service to run as your user:
+
+   ```nix
+   services.spotify-sync = {
+     # ... other settings ...
+     downloadPath = "/home/admin/media/music";
+     user = "admin";           # Your username
+     group = "users";          # Your primary group (run: groups admin)
+   };
+   ```
+
+2. **ProtectHome is enabled**: The module automatically disables `ProtectHome` for paths in `/home/`, but make sure you've pulled the latest changes.
+
+3. **Directory doesn't exist**: The directory will be created automatically, but parent directories must exist and be accessible by the configured user.
+
+**Error: Exactly one of users.users.X.isSystemUser and users.users.X.isNormalUser must be set**
+
+This means you have a user defined in your NixOS configuration without the required `isNormalUser` or `isSystemUser` attribute. Make sure your existing user definition has one of these set:
+
+```nix
+users.users.admin = {
+  isNormalUser = true;  # Required
+  extraGroups = [ "wheel" "networkmanager" ];
+  # ... other settings ...
+};
+```
+
+Note: The module will NOT create or modify your user if you specify it - it only creates the `spotify-sync` system user when using the defaults.
 
 **Redirect URI Issues**
 
