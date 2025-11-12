@@ -31,6 +31,7 @@ pkgs.mkShell {
     echo ""
     echo "Optional environment variables:"
     echo "  SPOTIFY_DOWNLOAD_FORMAT    - mp3 (default) or flac"
+    echo "  SPOTIFY_FETCH_ALL          - false (default, fetch recent 50) or true (fetch all)"
     echo ""
   '';
 }

@@ -110,6 +110,17 @@ in
       example = "mp3";
     };
 
+    fetchAll = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Whether to fetch all liked songs or just the most recent 50.
+        The Spotify API returns tracks in reverse chronological order (newest first).
+        Set to false (default) for faster syncs if you don't add many songs between runs.
+        Set to true to ensure all historical liked songs are synced.
+      '';
+    };
+
     user = mkOption {
       type = types.str;
       default = "spotify-sync";
@@ -157,6 +168,7 @@ in
           "SPOTIFY_CLIENT_SECRET=${cfg.clientSecret}"
           "SPOTIFY_REFRESH_TOKEN=${cfg.refreshToken}"
           "SPOTIFY_DOWNLOAD_FORMAT=${cfg.format}"
+          "SPOTIFY_FETCH_ALL=${if cfg.fetchAll then "true" else "false"}"
         ];
 
         ExecStart = "${spotify-sync}/bin/spotify-sync";

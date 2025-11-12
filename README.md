@@ -11,6 +11,7 @@ This project uses a modified version of [spotify-dl](https://github.com/GuillemC
 - 🔄 **Incremental sync**: Only downloads new albums on subsequent runs
 - 🎯 **ID-based matching**: Perfect file matching using Spotify track IDs
 - 🎧 **Flexible formats**: Choose MP3 (smaller) or FLAC (lossless) quality
+- ⚡ **Smart fetching**: By default only checks 50 most recent likes for efficiency
 - 🐧 **NixOS integration**: Deploy as a systemd service with scheduled runs
 - 🔒 **Secure**: Supports agenix/sops-nix for secret management
 
@@ -96,7 +97,8 @@ This project uses a modified version of [spotify-dl](https://github.com/GuillemC
 export SPOTIFY_CLIENT_ID="your_client_id"
 export SPOTIFY_CLIENT_SECRET="your_client_secret"
 export SPOTIFY_REFRESH_TOKEN="your_refresh_token"
-export SPOTIFY_DOWNLOAD_FORMAT="mp3"  # or "flac" for lossless (optional, defaults to mp3)
+export SPOTIFY_DOWNLOAD_FORMAT="mp3"   # or "flac" (optional, defaults to mp3)
+export SPOTIFY_FETCH_ALL="false"       # or "true" to fetch all songs (optional, defaults to false)
 ```
 
 Or create a `.env` file:
@@ -104,7 +106,8 @@ Or create a `.env` file:
 SPOTIFY_CLIENT_ID=your_client_id
 SPOTIFY_CLIENT_SECRET=your_client_secret
 SPOTIFY_REFRESH_TOKEN=your_refresh_token
-SPOTIFY_DOWNLOAD_FORMAT=mp3  # or "flac" (optional, defaults to mp3)
+SPOTIFY_DOWNLOAD_FORMAT=mp3   # or "flac" (optional, defaults to mp3)
+SPOTIFY_FETCH_ALL=false        # or "true" to fetch all songs (optional, defaults to false)
 ```
 
 And source it: `source .env`
@@ -199,7 +202,10 @@ To force re-download all albums, simply delete `downloaded.edn`.
 
 ## Notes
 
-- The script fetches all liked songs (handles pagination automatically)
+- **Smart fetching**: By default, the script only fetches the 50 most recently added liked songs (configurable with `fetchAll` option or `SPOTIFY_FETCH_ALL` environment variable)
+  - Spotify's API returns tracks in reverse chronological order (newest first)
+  - This makes subsequent syncs much faster if you don't add many songs between runs
+  - For initial sync or if you have many new likes, set `fetchAll = true`
 - **Album-based downloading**: When you like a song, the entire album is downloaded
   - If you like a second song from the same album, it won't be re-downloaded
   - You'll get the complete album even if you only liked one song
@@ -516,6 +522,7 @@ All available options for `services.spotify-sync`:
 | `downloadPath` | path | `/var/lib/spotify-sync` | Directory where songs will be downloaded |
 | `schedule` | string | `"daily"` | When to run sync (systemd timer format) |
 | `format` | enum | `"mp3"` | Audio format: `"mp3"` or `"flac"` |
+| `fetchAll` | boolean | `false` | Fetch all liked songs (true) or just most recent 50 (false) |
 | `user` | string | `"spotify-sync"` | User account for the service (set to your username for `/home` paths) |
 | `group` | string | `"spotify-sync"` | Group for the service (set to your group for `/home` paths) |
 
@@ -523,6 +530,23 @@ All available options for `services.spotify-sync`:
 
 - `"mp3"` (default) - Smaller file size (~5-10 MB per track), lossy compression, widely compatible
 - `"flac"` - Larger file size (~30-50 MB per track), lossless quality, best audio fidelity
+
+**Fetch Mode**
+
+The `fetchAll` option controls how many liked songs are fetched from Spotify:
+
+- `false` (default) - Only fetches the 50 most recently added liked songs
+  - ✅ Much faster API calls
+  - ✅ Ideal if you don't add many songs between syncs
+  - ✅ Spotify returns tracks in reverse chronological order (newest first)
+  - ⚠️ On first run, only syncs your 50 most recent likes
+
+- `true` - Fetches your entire liked songs library
+  - ✅ Ensures all historical songs are synced
+  - ✅ Use for initial sync or if you have a large backlog
+  - ⚠️ Slower due to pagination through entire library
+
+**Recommendation**: Use `fetchAll = false` (default) for regular scheduled syncs after doing an initial full sync with `fetchAll = true`.
 
 **Schedule Examples** (systemd calendar format)
 

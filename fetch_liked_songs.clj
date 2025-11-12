@@ -51,31 +51,34 @@
     (:access_token body)))
 
 (defn fetch-liked-songs
-  "Fetch all liked songs from Spotify"
-  [access-token]
-  (loop [url (str spotify-api-base "/me/tracks?limit=50")
-         all-tracks []]
-    (let [response (http/get url
-                            {:headers {"Authorization" (str "Bearer " access-token)}})
-          body (json/parse-string (:body response) true)
-          tracks (mapv (fn [item]
-                        (let [album (get-in item [:track :album])
-                              release-date (:release_date album)
-                              year (when release-date (subs release-date 0 4))]
-                          {:name (get-in item [:track :name])
-                           :artist (str/join ", " (map :name (get-in item [:track :artists])))
-                           :album (:name album)
-                           :album-uri (:uri album)
-                           :album-id (:id album)
-                           :year year
-                           :added-at (:added_at item)
-                           :id (get-in item [:track :id])
-                           :uri (get-in item [:track :uri])}))
-                      (:items body))
-          accumulated (into all-tracks tracks)]
-      (if-let [next-url (:next body)]
-        (recur next-url accumulated)
-        accumulated))))
+  "Fetch liked songs from Spotify (most recent first).
+   By default, only fetches the first page (50 tracks) for efficiency.
+   Set fetch-all? to true to fetch entire library."
+  ([access-token] (fetch-liked-songs access-token false))
+  ([access-token fetch-all?]
+   (loop [url (str spotify-api-base "/me/tracks?limit=50")
+          all-tracks []]
+     (let [response (http/get url
+                             {:headers {"Authorization" (str "Bearer " access-token)}})
+           body (json/parse-string (:body response) true)
+           tracks (mapv (fn [item]
+                         (let [album (get-in item [:track :album])
+                               release-date (:release_date album)
+                               year (when release-date (subs release-date 0 4))]
+                           {:name (get-in item [:track :name])
+                            :artist (str/join ", " (map :name (get-in item [:track :artists])))
+                            :album (:name album)
+                            :album-uri (:uri album)
+                            :album-id (:id album)
+                            :year year
+                            :added-at (:added_at item)
+                            :id (get-in item [:track :id])
+                            :uri (get-in item [:track :uri])}))
+                       (:items body))
+           accumulated (into all-tracks tracks)]
+       (if (and fetch-all? (if-let [next-url (:next body)] next-url false))
+         (recur next-url accumulated)
+         accumulated)))))
 
 (defn fetch-album-tracks
   "Fetch all tracks from an album"
@@ -200,10 +203,13 @@
     (let [client-id (get-env-var "SPOTIFY_CLIENT_ID")
           client-secret (get-env-var "SPOTIFY_CLIENT_SECRET")
           refresh-token (get-env-var "SPOTIFY_REFRESH_TOKEN")
+          fetch-all? (= "true" (System/getenv "SPOTIFY_FETCH_ALL"))
           _ (println "Authenticating with Spotify...")
           access-token (get-access-token client-id client-secret refresh-token)
-          _ (println "Fetching liked songs...")
-          tracks (fetch-liked-songs access-token)]
+          _ (if fetch-all?
+              (println "Fetching all liked songs...")
+              (println "Fetching recent liked songs (first 50)..."))
+          tracks (fetch-liked-songs access-token fetch-all?)]
       (download-tracks tracks access-token))
     (catch Exception e
       (println "\nError:" (.getMessage e))

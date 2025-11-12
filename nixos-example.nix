@@ -42,6 +42,10 @@ in
     # Audio format: "mp3" (smaller) or "flac" (lossless, larger)
     format = "mp3";
 
+    # Fetch mode: false = only recent 50 tracks (faster), true = all tracks
+    # Use false for regular syncs, true for initial sync or catching up
+    fetchAll = false;
+
     # Optional: If using a path in /home/, set user/group to your user
     # downloadPath = "/home/youruser/music";
     # user = "youruser";
