@@ -172,6 +172,8 @@ in
           "SPOTIFY_REFRESH_TOKEN=${cfg.refreshToken}"
           "SPOTIFY_DOWNLOAD_FORMAT=${cfg.format}"
           "SPOTIFY_FETCH_ALL=${if cfg.fetchAll then "true" else "false"}"
+          # Force IPv4 to avoid IPv6 connectivity issues
+          "BABASHKA_JAVA_OPTS=-Djava.net.preferIPv4Stack=true"
         ];
 
         ExecStart = "${spotify-sync}/bin/spotify-sync";

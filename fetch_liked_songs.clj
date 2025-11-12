@@ -67,15 +67,37 @@
       (println (str "Warning: Could not clean up temp directory: " (.getMessage e))))))
 
 (defn get-access-token
-  "Get access token using refresh token flow"
+  "Get access token using refresh token flow with retry logic"
   [client-id client-secret refresh-token]
-  (let [body-str (str "grant_type=refresh_token&refresh_token=" refresh-token)
-        response (http/post (str spotify-auth-base "/api/token")
-                            {:headers {"Content-Type" "application/x-www-form-urlencoded"}
-                             :basic-auth [client-id client-secret]
-                             :body body-str})
-        body (json/parse-string (:body response) true)]
-    (:access_token body)))
+  (let [max-retries 3
+        retry-delay-ms 2000]
+    (loop [attempt 1
+           last-error nil]
+      (let [result (try
+                     (let [body-str (str "grant_type=refresh_token&refresh_token=" refresh-token)
+                           response (http/post (str spotify-auth-base "/api/token")
+                                               {:headers {"Content-Type" "application/x-www-form-urlencoded"}
+                                                :basic-auth [client-id client-secret]
+                                                :body body-str})
+                           body (json/parse-string (:body response) true)]
+                       {:success true :token (:access_token body)})
+                     (catch Exception e
+                       {:success false :error e}))]
+        (if (:success result)
+          (:token result)
+          (let [error (:error result)
+                error-msg (.getMessage error)
+                is-network-error (or (str/includes? error-msg "Network is unreachable")
+                                    (str/includes? error-msg "Connection refused")
+                                    (str/includes? error-msg "Temporary failure in name resolution")
+                                    (str/includes? error-msg "No route to host"))]
+            (if (and (< attempt max-retries) is-network-error)
+              (do
+                (println (str "  ⚠ Network error on attempt " attempt "/" max-retries ": " error-msg))
+                (println (str "  ℹ This may indicate IPv6/DNS issues. Retrying in " (/ retry-delay-ms 1000) " seconds..."))
+                (Thread/sleep retry-delay-ms)
+                (recur (inc attempt) error))
+              (throw error))))))))
 
 (defn fetch-liked-songs
   "Fetch liked songs from Spotify (most recent first).

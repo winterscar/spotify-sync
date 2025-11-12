@@ -678,6 +678,38 @@ This is normal and the failed track will be retried on your next sync. The incom
 
 **Why duration validation?** Checking actual track duration is more accurate than file size - a 328KB FLAC file that should be 20-50MB is definitively incomplete. The 3-second tolerance accounts for minor encoding variations while catching truncated audio.
 
+**Network errors during authentication**
+
+If you see intermittent "Network is unreachable" errors:
+```
+Error: Network is unreachable
+```
+
+This is typically caused by **IPv6 connectivity issues**. Babashka (running on GraalVM/JVM) prefers IPv6 by default, and if your system has IPv6 partially configured but not working properly, connections will fail.
+
+**The fix**: The service now forces IPv4 via `BABASHKA_JAVA_OPTS=-Djava.net.preferIPv4Stack=true` and includes retry logic (3 attempts with 2-second delays).
+
+If issues persist after rebuilding, check your IPv6 configuration:
+```bash
+# Check if IPv6 is enabled but not working
+ip -6 addr show
+ping6 google.com
+
+# Check DNS resolution
+nslookup accounts.spotify.com
+
+# View service logs for retry messages
+journalctl -u spotify-sync.service -n 50
+```
+
+**Alternative**: Completely disable IPv6 on your system if you're not using it:
+```nix
+boot.kernel.sysctl = {
+  "net.ipv6.conf.all.disable_ipv6" = true;
+  "net.ipv6.conf.default.disable_ipv6" = true;
+};
+```
+
 **Redirect URI Issues**
 
 If Spotify rejects `http://127.0.0.1:8888/callback`, you can:
