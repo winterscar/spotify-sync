@@ -201,47 +201,54 @@
       (println (str "  ✓ Organized: " artist "/" album-with-year "/" track-name extension))
       true)))
 
-(defn process-album-downloads [albums-to-process access-token format]
+(defn process-album-downloads [albums-to-process tracks-downloaded format]
   "Match downloaded files to album tracks and organize them"
   (println "\nOrganizing downloaded files...")
   (let [downloaded (read-downloaded)
         successful (atom downloaded)
-        current-dir temp-download-dir]
+        current-dir temp-download-dir
+        ;; Group downloaded tracks by album for easier lookup
+        tracks-by-album (group-by :album-uri tracks-downloaded)]
 
     (doseq [{:keys [album-uri album-id album year artist]} albums-to-process]
       (println (str "\nProcessing album: " album " [" year "]..."))
-      ;; Fetch all tracks in this album from Spotify
-      (let [album-tracks (fetch-album-tracks access-token album-id)
-            ;; Enrich album tracks with album metadata
-            enriched-tracks (mapv #(assoc %
-                                          :album album
-                                          :year year
-                                          ;; Use the artist from the album track, not the liked song
-                                          :artist (:artist %))
-                                 album-tracks)
+      ;; Get tracks that were downloaded for this album this run
+      (let [album-downloaded-tracks (get tracks-by-album album-uri [])
             ;; Track how many files we successfully organize
-            organized-count (atom 0)]
+            organized-count (atom 0)
+            failed-count (atom 0)]
 
-        ;; Try to match and organize each track by track ID
-        (doseq [track enriched-tracks]
-          (when-let [matched-file (find-track-file (:id track) current-dir format)]
-            (println (str "    Found: " (.getName matched-file) " → " (:name track)))
-            (if (validate-file-duration matched-file (:duration-ms track) (:name track))
-              (when (organize-file track matched-file format)
-                ;; Mark this individual track as successfully downloaded
-                (swap! successful conj (:uri track))
-                (swap! organized-count inc))
-              (do
-                (println (str "    ✗ Skipping incomplete file (will retry on next sync)"))
-                ;; Delete the incomplete file so it doesn't clutter temp dir
-                (.delete matched-file)))))
+        ;; Try to match and organize each downloaded track by track ID
+        (doseq [track album-downloaded-tracks]
+          (if-let [matched-file (find-track-file (:id track) current-dir format)]
+            (do
+              (println (str "    Found: " (.getName matched-file) " → " (:name track)))
+              (if (validate-file-duration matched-file (:duration-ms track) (:name track))
+                (when (organize-file track matched-file format)
+                  ;; Mark this individual track as successfully downloaded
+                  (swap! successful conj (:uri track))
+                  (swap! organized-count inc))
+                (do
+                  (println (str "    ✗ Skipping incomplete file (will retry on next sync)"))
+                  ;; Delete the incomplete file so it doesn't clutter temp dir
+                  (.delete matched-file)
+                  (swap! failed-count inc))))
+            (do
+              (println (str "    ✗ File not found for track: " (:name track)))
+              (swap! failed-count inc))))
 
         ;; Report on album completion
-        (let [total-tracks (count enriched-tracks)]
-          (if (= @organized-count total-tracks)
-            (println (str "  ✓ Organized " @organized-count "/" total-tracks " tracks from album"))
-            (println (str "  ⚠ Only organized " @organized-count "/" total-tracks
-                         " tracks - failed tracks will retry on next sync"))))))
+        (let [total-attempted (count album-downloaded-tracks)]
+          (cond
+            (= @organized-count total-attempted)
+            (println (str "  ✓ Organized " @organized-count "/" total-attempted " tracks from album"))
+
+            (> @organized-count 0)
+            (println (str "  ⚠ Organized " @organized-count "/" total-attempted
+                         " tracks - " @failed-count " failed (will retry on next sync)"))
+
+            :else
+            (println (str "  ✗ No tracks organized - " @failed-count " failed (will retry on next sync)"))))))
 
     ;; Save updated downloaded list
     (write-downloaded @successful)
@@ -294,8 +301,12 @@
             (if (zero? (:exit result))
               (do
                 (println "\n✓ Download complete!")
-                ;; Process albums for organization
-                (process-album-downloads unique-albums access-token format)
+                ;; Only process albums that had tracks downloaded this run
+                (let [albums-with-new-tracks (->> tracks-to-download
+                                                  (group-by :album-uri)
+                                                  vals
+                                                  (mapv first))]
+                  (process-album-downloads albums-with-new-tracks tracks-to-download format))
                 ;; Clean up temp directory after successful organization
                 (cleanup-temp-dir)
                 (println "✓ Temporary files cleaned up"))
