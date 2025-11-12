@@ -29,6 +29,8 @@
 
             buildInputs = with pkgs; [
               openssl
+            ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+              alsa-lib
             ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
               darwin.apple_sdk.frameworks.Security
               darwin.apple_sdk.frameworks.CoreFoundation

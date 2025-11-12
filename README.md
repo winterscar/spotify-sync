@@ -545,7 +545,17 @@ spotify-sync = builtins.fetchGit {
 
 **Error: Could not find openssl via pkg-config**
 
-If you see errors about OpenSSL not being found, the repository might have an outdated version of the module. Pull the latest changes which include OpenSSL as a build dependency. If you're using a local clone, make sure you've pulled the latest commits that include the OpenSSL fix.
+If you see errors about OpenSSL not being found, the repository might have an outdated version of the module. Pull the latest changes which include OpenSSL as a build dependency.
+
+**Error: The system library `alsa` required by crate `alsa-sys` was not found**
+
+ALSA (Advanced Linux Sound Architecture) is required on Linux for audio support. The latest version of the module includes `alsa-lib` as a dependency. Make sure you've pulled the latest commits or refresh your git fetch:
+
+```bash
+sudo nixos-rebuild switch --refresh
+```
+
+If you're using a local clone, make sure you've pulled the latest commits that include both the OpenSSL and ALSA fixes.
 
 **Redirect URI Issues**
 
