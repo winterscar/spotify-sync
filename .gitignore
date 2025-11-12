@@ -1,0 +1,27 @@
+# Secrets and credentials
+.env
+*.age
+*.asc
+downloaded.edn
+
+# Downloaded songs
+songs/
+*.mp3
+*.flac
+
+# Build artifacts
+/spotify-dl/target/
+result
+result-*
+
+# Nix
+.direnv/
+.envrc
+
+# Babashka
+.clj-kondo/
+.lsp/
+
+# Temporary files
+*.log
+*.tmp
