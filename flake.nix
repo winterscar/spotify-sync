@@ -53,7 +53,7 @@
             : "''${SPOTIFY_REFRESH_TOKEN:?SPOTIFY_REFRESH_TOKEN not set}"
 
             # Set spotify-dl binary path
-            export PATH="${self.packages.${system}.spotify-dl}/bin:$PATH"
+            export SPOTIFY_DL_BIN="${self.packages.${system}.spotify-dl}/bin/spotify-dl"
 
             # Run the sync script
             ${pkgs.babashka}/bin/bb ${./fetch_liked_songs.clj}

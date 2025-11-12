@@ -557,6 +557,14 @@ sudo nixos-rebuild switch --refresh
 
 If you're using a local clone, make sure you've pulled the latest commits that include both the OpenSSL and ALSA fixes.
 
+**Error: Cannot run program ".../spotify-dl/target/debug/spotify-dl": No such file or directory**
+
+This error occurs when the script tries to use a hardcoded development path instead of the Nix-built binary. The latest version sets `SPOTIFY_DL_BIN` explicitly in the wrapper script. Make sure you've pulled the latest changes and refresh your build:
+
+```bash
+sudo nixos-rebuild switch --refresh
+```
+
 **Redirect URI Issues**
 
 If Spotify rejects `http://127.0.0.1:8888/callback`, you can:
