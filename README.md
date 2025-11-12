@@ -6,13 +6,15 @@ This project uses a modified version of [spotify-dl](https://github.com/GuillemC
 
 ## Features
 
-- 🎵 **Album-based downloading**: Downloads entire albums when you like a song
+- 🎵 **Album-based downloading**: Downloads complete albums when you like any track, with track-level progress tracking
 - 📁 **Organized structure**: `<downloadPath>/<artist>/<album [year]>/<track>.mp3`
-- 🔄 **Incremental sync**: Only downloads new albums on subsequent runs
+- 🔄 **Incremental sync**: Skips already-downloaded tracks on subsequent runs
 - 🎯 **ID-based matching**: Perfect file matching using Spotify track IDs
 - 🎧 **Flexible formats**: Choose MP3 (smaller) or FLAC (lossless) quality
 - ⚡ **Smart fetching**: By default only checks 50 most recent likes for efficiency
 - 🛡️ **Media server friendly**: Downloads to temp directory first to prevent premature indexing
+- ✅ **Duration validation**: Detects incomplete downloads by comparing track durations, auto-retries failures
+- 🔁 **Resilient retries**: Failed tracks retry individually without re-downloading successful ones
 - 🐧 **NixOS integration**: Deploy as a systemd service with scheduled runs
 - 🔒 **Secure**: Supports agenix/sops-nix for secret management
 
@@ -137,22 +139,25 @@ bb fetch_liked_songs.clj
 The script will:
 1. Authenticate with Spotify using your refresh token
 2. Fetch all your liked songs (or just the 50 most recent)
-3. Group songs by album
-4. Skip albums that have already been downloaded (tracked in `downloaded.edn`)
-5. **Download entire albums** to a temporary directory (`/tmp/spotify-sync-download`)
-6. Query Spotify for all tracks in each album to ensure complete downloads
-7. Organize downloaded files into `./<artist>/<album [year]>/<track>.mp3`
-8. Update `downloaded.edn` with successfully downloaded albums
-9. Clean up temporary directory
+3. Identify unique albums from your liked songs
+4. **Fetch complete track lists** for each album from Spotify
+5. Filter out tracks already downloaded (tracked in `downloaded.edn`)
+6. **Download the remaining track URIs** to a temporary directory (`/tmp/spotify-sync-download`)
+7. **Validate each file's duration** against Spotify's expected track length
+8. Organize validated files into `./<artist>/<album [year]>/<track>.mp3`
+9. Update `downloaded.edn` with each successfully downloaded track
+10. Clean up temporary directory
 
 **Note**: Files are downloaded to `/tmp/spotify-sync-download` first to prevent media servers (like Plex) from indexing incomplete files during the download process.
 
-**Why download full albums?**
-- More efficient than downloading songs one-by-one
-- Gives you the complete album even if you only liked one song
-- Avoids duplicate downloads when you like multiple songs from the same album
+**Download behavior:**
+- When you like ANY track from an album, the script downloads the **complete album**
+- Individual tracks are tracked in `downloaded.edn` after successful validation
+- Already-downloaded tracks are automatically skipped (even from the same album)
+- If you like multiple songs from an album over time, only the new tracks are downloaded
+- Failed tracks can retry individually without re-downloading successful ones
 
-**On subsequent runs**, the script will only download albums from newly liked songs.
+**On subsequent runs**, the script will only download tracks that haven't been successfully downloaded yet.
 
 ## Manual spotify-dl Usage
 
@@ -200,13 +205,14 @@ Album directories include the release year in square brackets for easy sorting a
 
 When running as a systemd service, `PrivateTmp=true` provides an isolated `/tmp` namespace that's automatically cleaned up when the service exits, providing additional security and ensuring no leftover files.
 
-The `downloaded.edn` file tracks which **albums** have been successfully downloaded by their Spotify URI. This allows the script to:
-- Skip already-downloaded albums on subsequent runs
-- Only download new albums when you like new songs
-- Automatically download complete albums (not just individual tracks)
-- Resume if interrupted
+The `downloaded.edn` file tracks which **individual tracks** have been successfully downloaded by their Spotify URI. This allows the script to:
+- Download complete albums when you like any track from them
+- Skip already-downloaded tracks (even when downloading the rest of an album)
+- Only download new tracks when you like new songs or albums
+- Retry only failed tracks from an album if some tracks had issues
+- Resume if interrupted without re-downloading successful tracks
 
-To force re-download all albums, simply delete `downloaded.edn`.
+To force re-download all tracks, simply delete `downloaded.edn`.
 
 ## Notes
 
@@ -214,9 +220,12 @@ To force re-download all albums, simply delete `downloaded.edn`.
   - Spotify's API returns tracks in reverse chronological order (newest first)
   - This makes subsequent syncs much faster if you don't add many songs between runs
   - For initial sync or if you have many new likes, set `fetchAll = true`
-- **Album-based downloading**: When you like a song, the entire album is downloaded
-  - If you like a second song from the same album, it won't be re-downloaded
-  - You'll get the complete album even if you only liked one song
+- **Album-based downloading with track-level tracking**: When you like any track, the complete album is downloaded
+  - Individual tracks are tracked in `downloaded.edn` after successful validation
+  - Already-downloaded tracks are automatically skipped (even from the same album)
+  - If you like more songs from an album later, only the new tracks are downloaded
+  - Each track is validated using duration comparison before being marked as complete
+  - Failed tracks retry individually without re-downloading successful ones
 - **ID-based file matching**: Files are named by their Spotify track ID during download, then renamed to proper track names when organized
   - Ensures perfect matching regardless of special characters, multiple artists, or featured artists
   - Example: `4cOdK2wGLETKBW3PvgPWqT.mp3` → `Artist/Album [2024]/Track Name.mp3`
@@ -647,6 +656,27 @@ rm -rf /tmp/spotify-sync-download
 ```
 
 The temporary directory is in `/tmp` (outside your media directory) to ensure media servers never scan it.
+
+**Incomplete/corrupted downloads**
+
+Some tracks may occasionally download incompletely due to network issues or streaming failures. The script includes **duration validation** to detect this:
+
+- Each downloaded file's duration is compared to Spotify's expected track length using `exiftool`
+- Files with duration mismatches greater than 3 seconds are flagged as incomplete
+- Incomplete files are skipped and not organized into your library
+- Only successfully validated tracks are marked as downloaded
+- Failed tracks automatically retry on the next sync
+
+If you see warnings about duration mismatches:
+```
+⚠ Warning: Duration mismatch for 'Track Name'
+   Expected: 245.3s, Got: 12.1s, Diff: 233.2s
+✗ Skipping incomplete file (will retry on next sync)
+```
+
+This is normal and the failed track will be retried on your next sync. The incomplete file is automatically deleted from the temp directory. Other tracks from the same album that downloaded successfully won't need to be re-downloaded.
+
+**Why duration validation?** Checking actual track duration is more accurate than file size - a 328KB FLAC file that should be 20-50MB is definitively incomplete. The 3-second tolerance accounts for minor encoding variations while catching truncated audio.
 
 **Redirect URI Issues**
 

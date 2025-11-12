@@ -55,6 +55,9 @@
             # Set spotify-dl binary path
             export SPOTIFY_DL_BIN="${self.packages.${system}.spotify-dl}/bin/spotify-dl"
 
+            # Add exiftool to PATH for duration validation
+            export PATH="${pkgs.exiftool}/bin:$PATH"
+
             # Run the sync script
             ${pkgs.babashka}/bin/bb ${./fetch_liked_songs.clj}
           '';

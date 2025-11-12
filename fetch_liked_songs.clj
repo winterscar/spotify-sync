@@ -25,7 +25,7 @@
                       {:var var-name}))))
 
 (defn read-downloaded []
-  "Read the set of already downloaded track URIs"
+  "Read the set of already downloaded track URIs (individual tracks, not albums)"
   (if (.exists (io/file downloaded-file))
     (set (edn/read-string (slurp downloaded-file)))
     #{}))
@@ -100,7 +100,8 @@
                             :year year
                             :added-at (:added_at item)
                             :id (get-in item [:track :id])
-                            :uri (get-in item [:track :uri])}))
+                            :uri (get-in item [:track :uri])
+                            :duration-ms (get-in item [:track :duration_ms])}))
                        (:items body))
            accumulated (into all-tracks tracks)
            next-url (:next body)]
@@ -120,7 +121,8 @@
                         {:name (:name item)
                          :artist (str/join ", " (map :name (:artists item)))
                          :uri (:uri item)
-                         :id (:id item)})
+                         :id (:id item)
+                         :duration-ms (:duration_ms item)})
                       (:items body))
           accumulated (into all-tracks tracks)]
       (if-let [next-url (:next body)]
@@ -133,6 +135,49 @@
         expected-file (io/file current-dir (str track-id extension))]
     (when (.exists expected-file)
       expected-file)))
+
+(defn get-file-duration-ms [file]
+  "Get duration of audio file in milliseconds using exiftool"
+  (try
+    (let [result (process/shell {:out :string :err :string}
+                                "exiftool" "-Duration" "-s3" (.getPath file))
+          output (str/trim (:out result))]
+      (when (zero? (:exit result))
+        ;; exiftool returns duration in format like "0:03:45" or "3:45.50"
+        ;; Parse it into milliseconds
+        (let [parts (str/split output #":")
+              seconds (if (= (count parts) 3)
+                       ;; Format: H:MM:SS.ss
+                       (+ (* (parse-long (first parts)) 3600)
+                          (* (parse-long (second parts)) 60)
+                          (Double/parseDouble (nth parts 2)))
+                       ;; Format: M:SS.ss
+                       (+ (* (parse-long (first parts)) 60)
+                          (Double/parseDouble (second parts))))]
+          (* seconds 1000))))  ; Convert to milliseconds
+    (catch Exception e
+      (println (str "    Warning: Could not read file duration: " (.getMessage e)))
+      nil)))
+
+(defn validate-file-duration [file expected-duration-ms track-name]
+  "Check if file duration matches expected duration from Spotify (returns true if valid)"
+  (if-let [actual-duration-ms (get-file-duration-ms file)]
+    (let [expected-sec (/ expected-duration-ms 1000.0)
+          actual-sec (/ actual-duration-ms 1000.0)
+          diff-sec (Math/abs (- expected-sec actual-sec))
+          tolerance-sec 3.0]  ; Allow 3 seconds tolerance for encoding differences
+      (if (> diff-sec tolerance-sec)
+        (do
+          (println (str "    ⚠ Warning: Duration mismatch for '" track-name "'"))
+          (println (str "       Expected: " (format "%.1f" expected-sec) "s, "
+                       "Got: " (format "%.1f" actual-sec) "s, "
+                       "Diff: " (format "%.1f" diff-sec) "s"))
+          false)
+        true))
+    ;; If we can't read duration, assume it's bad
+    (do
+      (println (str "    ✗ Could not validate duration for '" track-name "'"))
+      false)))
 
 (defn organize-file [track current-file format]
   "Move file to organized directory structure: <artist>/<album [year]>/<track>.<format>"
@@ -181,58 +226,83 @@
         (doseq [track enriched-tracks]
           (when-let [matched-file (find-track-file (:id track) current-dir format)]
             (println (str "    Found: " (.getName matched-file) " → " (:name track)))
-            (when (organize-file track matched-file format)
-              (swap! organized-count inc))))
+            (if (validate-file-duration matched-file (:duration-ms track) (:name track))
+              (when (organize-file track matched-file format)
+                ;; Mark this individual track as successfully downloaded
+                (swap! successful conj (:uri track))
+                (swap! organized-count inc))
+              (do
+                (println (str "    ✗ Skipping incomplete file (will retry on next sync)"))
+                ;; Delete the incomplete file so it doesn't clutter temp dir
+                (.delete matched-file)))))
 
-        ;; If we found at least one track, consider the album successfully downloaded
-        (when (pos? @organized-count)
-          (swap! successful conj album-uri)
-          (println (str "  ✓ Organized " @organized-count " tracks from album")))))
+        ;; Report on album completion
+        (let [total-tracks (count enriched-tracks)]
+          (if (= @organized-count total-tracks)
+            (println (str "  ✓ Organized " @organized-count "/" total-tracks " tracks from album"))
+            (println (str "  ⚠ Only organized " @organized-count "/" total-tracks
+                         " tracks - failed tracks will retry on next sync"))))))
 
     ;; Save updated downloaded list
     (write-downloaded @successful)
-    (println (str "\n✓ Organization complete! " (- (count @successful) (count downloaded)) " new albums added."))))
+    (println (str "\n✓ Organization complete! " (- (count @successful) (count downloaded)) " new tracks added."))))
 
 (defn download-tracks [tracks access-token]
   (let [already-downloaded (read-downloaded)
-        ;; Filter to tracks whose albums aren't already downloaded
-        tracks-to-download (filterv #(not (contains? already-downloaded (:album-uri %))) tracks)
+        format (or (System/getenv "SPOTIFY_DOWNLOAD_FORMAT") "mp3")
 
-        ;; Group by album to avoid downloading the same album multiple times
-        albums-to-download (vals (group-by :album-uri tracks-to-download))
-        unique-albums (mapv first albums-to-download)
+        ;; Get unique albums from liked tracks
+        albums-from-liked (vals (group-by :album-uri tracks))
+        unique-albums (mapv first albums-from-liked)]
 
-        skipped-count (- (count tracks) (count tracks-to-download))
-        format (or (System/getenv "SPOTIFY_DOWNLOAD_FORMAT") "mp3")]
+    (println (str "\nFound " (count tracks) " liked songs from " (count unique-albums) " albums"))
+    (println "Fetching complete track lists for each album...")
 
-    (println (str "\nFound " (count tracks) " liked songs"))
-    (when (pos? skipped-count)
-      (println (str "  " skipped-count " songs from already downloaded albums (skipping)")))
-    (println (str "  " (count unique-albums) " unique albums to download\n"))
+    ;; For each album, get ALL tracks and filter out already-downloaded ones
+    (let [all-album-tracks (mapcat (fn [album-info]
+                                     (let [album-tracks (fetch-album-tracks access-token (:album-id album-info))
+                                           ;; Enrich with album metadata
+                                           enriched (mapv #(assoc %
+                                                                  :album (:album album-info)
+                                                                  :album-uri (:album-uri album-info)
+                                                                  :album-id (:album-id album-info)
+                                                                  :year (:year album-info)
+                                                                  :artist (:artist %))
+                                                         album-tracks)]
+                                       enriched))
+                                   unique-albums)
+          tracks-to-download (filterv #(not (contains? already-downloaded (:uri %))) all-album-tracks)
+          skipped-count (- (count all-album-tracks) (count tracks-to-download))]
 
-    (if (empty? unique-albums)
-      (println "Nothing to download!")
-      (do
-        ;; Ensure clean temp directory for downloads
-        (ensure-temp-dir)
-        (println (str "Downloading albums as " (str/upper-case format) " to temporary directory...\n"))
-        (let [album-uris (mapv :album-uri unique-albums)
-              args (concat ["-a" access-token "-f" format] album-uris)
-              _ (println "Running spotify-dl with" (count album-uris) "albums...")
-              ;; Download to temp directory
-              result (apply process/shell {:out :inherit :err :inherit :dir temp-download-dir}
-                            spotify-dl-bin args)]
-          (if (zero? (:exit result))
-            (do
-              (println "\n✓ Download complete!")
-              (process-album-downloads unique-albums access-token format)
-              ;; Clean up temp directory after successful organization
-              (cleanup-temp-dir)
-              (println "✓ Temporary files cleaned up"))
-            (do
-              (println "\n✗ Download failed with exit code:" (:exit result))
-              (cleanup-temp-dir)
-              (System/exit 1))))))))
+      (println (str "  Total tracks from these albums: " (count all-album-tracks)))
+      (when (pos? skipped-count)
+        (println (str "  " skipped-count " already downloaded (skipping)")))
+      (println (str "  " (count tracks-to-download) " tracks to download\n"))
+
+      (if (empty? tracks-to-download)
+        (println "Nothing to download!")
+        (do
+          ;; Ensure clean temp directory for downloads
+          (ensure-temp-dir)
+          (println (str "Downloading " (count tracks-to-download) " tracks as " (str/upper-case format) " to temporary directory...\n"))
+          (let [track-uris (mapv :uri tracks-to-download)
+                args (concat ["-a" access-token "-f" format] track-uris)
+                _ (println "Running spotify-dl with" (count track-uris) "tracks...")
+                ;; Download to temp directory
+                result (apply process/shell {:out :inherit :err :inherit :dir temp-download-dir}
+                              spotify-dl-bin args)]
+            (if (zero? (:exit result))
+              (do
+                (println "\n✓ Download complete!")
+                ;; Process albums for organization
+                (process-album-downloads unique-albums access-token format)
+                ;; Clean up temp directory after successful organization
+                (cleanup-temp-dir)
+                (println "✓ Temporary files cleaned up"))
+              (do
+                (println "\n✗ Download failed with exit code:" (:exit result))
+                (cleanup-temp-dir)
+                (System/exit 1)))))))))
 
 (defn -main []
   (try
